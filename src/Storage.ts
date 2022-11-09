@@ -2,16 +2,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import zlib from "zlib";
 import { Time, Size } from "./Units";
 
-
 export class Storage {
-	// private _name: string;
+	private _name!: string;
 	private _basePath: string;
 	private _rootPath: string;
 	// private _fileTypes: string[];
-	private _maxFileSizeBytes: number;
+	private _maxFileSizeBytes = Infinity;
 	private _maxFileAgeAmount = 0;
 	private _maxFileAgeUnit: AllowedTimeUnitsT = "h";
 	private _maxFileAgeMs = 0;
@@ -22,13 +20,30 @@ export class Storage {
 	// private _indexed: boolean;
 	private _tree: string[] = [];
 
+	public set maxFileAge(ageObject: ParsedAgeT) {
+		this._maxFileAgeAmount = ageObject.amount;
+		this._maxFileAgeUnit = ageObject.unit;
+		this._maxFileAgeMs = ageObject.ms || 0;
+	}
+
+	public get name() { return this._name; }
+
+	public set name(newName: string) {
+		const nameChars = newName.trim().split("");
+		if (nameChars.length > 32) throw new Error("storage: Name exceeds the maximum length of 32 characters.");
+		const forbiddenCharacters = ("+=ªº°´`'\"~^¨:,;.!?()[]{}@#$%&*<>|/\\").split("");
+		if (nameChars.some(char => forbiddenCharacters.includes(char))) throw new Error("storage: Name has forbidden characters: +=*ªº°´`~^¨'\":,;.!?()[]{}@#$%&<>|\\/");
+		this._name = newName;
+	}
+
 	constructor (config: StorageConfigT) {
 		if (!config.path || !config.name) {
 			throw new Error("storage: Constructor parameter(s) not informed.");
 		}
+		this.name = config.name;
 		this._basePath = config.path;
 		this._rootPath = path.join(config.path, config.name);
-		this._maxFileSizeBytes = config.maxFileSize ? this.parseSizeStringToBytes(config.maxFileSize) : 0;
+		this._maxFileSizeBytes = config.maxFileSize ? this.parseSizeStringToBytes(config.maxFileSize) : Infinity;
 		if (config.maxFileAge) {
 			this.maxFileAge = this.parseAgeString(config.maxFileAge);
 		}
@@ -100,12 +115,6 @@ export class Storage {
 		}
 	}
 
-	public set maxFileAge(ageObject: ParsedAgeT) {
-		this._maxFileAgeAmount = ageObject.amount;
-		this._maxFileAgeUnit = ageObject.unit;
-		this._maxFileAgeMs = ageObject.ms || 0;
-	}
-
 	// Method to show the hierarchy of directories and files.
 	public getTree(dir?: string, parentDir?: string) {
 		const rootDir = fs.readdirSync(dir || this._rootPath, { withFileTypes: true });
@@ -165,31 +174,59 @@ export class Storage {
 				});
 			}
 		});
-
 	}
 
-	// Method to compress files.
-	public compressFiles() {
-		const zip = zlib.createGzip();
-		const inp = fs.createReadStream("./87.txt");
-		const out = fs.createWriteStream("./87.gz");
-		inp.pipe(zip).pipe(out);
-	}
+	public searchFiles(fileConfig?: SearchFilesObjectT) {
 
-	// Method to decompress files.
-	public decompressFiles() {
-		const unzip = zlib.createUnzip();
-		const inp = fs.createReadStream("./87.gz");
-		const out = fs.createWriteStream("./87.txt");
-		inp.pipe(unzip).pipe(out);
+		const mapFileToObject = (filePath: string) => {
+			const fileSpecs = fs.statSync(path.join(this._rootPath, filePath));
+			return {
+				path: path.join(this._rootPath, filePath),
+				name: path.basename(filePath),
+				modifiedDate: new Date(fileSpecs.mtimeMs),
+				size: fileSpecs.size,
+			};
+		};
+
+		if (fileConfig) {
+			if (fileConfig.fileName && typeof fileConfig.fileName !== "string") throw new Error("storage: fileName must be of type string");
+			if (fileConfig.modificationDate?.oldest && !(fileConfig.modificationDate?.oldest instanceof Date)) throw new Error("storage: modificationDate.oldest must be of Date object.");
+			if (fileConfig.modificationDate?.newest && !(fileConfig.modificationDate?.newest instanceof Date)) throw new Error("storage: modificationDate.newest must be of Date object.");
+		} else {
+			return this.getTree().map(mapFileToObject);
+		}
+		const searchCriteria = {
+			fileName: fileConfig?.fileName ?? "",
+			fileSize: {
+				lowerBound: fileConfig?.fileSize?.lowerBound ? this.parseSizeStringToBytes(fileConfig.fileSize.lowerBound) : 0,
+				upperBound: fileConfig?.fileSize?.upperBound ? this.parseSizeStringToBytes(fileConfig.fileSize.upperBound) : Infinity,
+			},
+			modificationDate: {
+				oldest: fileConfig?.modificationDate?.oldest ?? new Date(-8_640_000_000_000_000),
+				newest: fileConfig?.modificationDate?.newest ?? new Date(8_640_000_000_000_000),
+			},
+		};
+		if (searchCriteria.fileSize.lowerBound > searchCriteria.fileSize.upperBound) {
+			[searchCriteria.fileSize.lowerBound, searchCriteria.fileSize.upperBound] = [searchCriteria.fileSize.upperBound, searchCriteria.fileSize.lowerBound];
+		}
+		if (searchCriteria.modificationDate.oldest > searchCriteria.modificationDate.newest) {
+			[searchCriteria.modificationDate.oldest, searchCriteria.modificationDate.newest] = [searchCriteria.modificationDate.newest, searchCriteria.modificationDate.oldest];
+		}
+		return this.getTree()
+			.map(mapFileToObject)
+			.filter(file => {
+				return file.path.includes(searchCriteria.fileName) &&
+					file.modifiedDate >= searchCriteria.modificationDate.oldest &&
+					file.modifiedDate <= searchCriteria.modificationDate.newest &&
+					file.size >= searchCriteria.fileSize.lowerBound &&
+					file.size <= searchCriteria.fileSize.upperBound;
+			});
+
 	}
 }
-// private runBackup() {
-// 	throw new Error("Método não implementado");
-// }
 
-// private search() { 
-// 	throw new Error("Método não implementado");
+// private runBackup() {
+// 	throw new Error*-("Método não implementado");
 // }
 
 type StorageConfigT = {
@@ -206,4 +243,17 @@ type StorageConfigT = {
 };
 
 type AllowedTimeUnitsT = "h" | "d" | "w" | "m" | "y";
-type ParsedAgeT = { amount: number, unit: AllowedTimeUnitsT; ms?: number; };
+
+type ParsedAgeT = { amount: number; unit: AllowedTimeUnitsT; ms?: number; };
+
+type SearchFilesObjectT = {
+	fileName?: string;
+	fileSize?: {
+		lowerBound?: string;
+		upperBound?: string;
+	};
+	modificationDate?: {
+		oldest?: Date;
+		newest?: Date;
+	};
+};
