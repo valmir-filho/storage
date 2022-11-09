@@ -48,4 +48,5 @@ File.fromBinary();
 ## Roadmap
 
 - Criptografia de arquivos;
-- Definição da estrutura de pastas inicial
+- Definição da estrutura de pastas inicial;
+- Criar método de backup.
