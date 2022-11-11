@@ -24,3 +24,5 @@ const storage = new Storage({
 // 		oldest: new Date(2023, 10, 21)
 // 	},
 // }));
+
+storage.runBackup();
