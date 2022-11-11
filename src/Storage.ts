@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Time, Size } from "./Units";
+import zlib from "node:zlib";
 
 export class Storage {
 	private _name!: string;
@@ -14,7 +15,7 @@ export class Storage {
 	private _maxFileAgeUnit: AllowedTimeUnitsT = "h";
 	private _maxFileAgeMs = 0;
 	private _firstDayOfWeek = 0;
-	// private _backupPath: string;
+	private _backupPath: string | undefined;
 	// private _useCompression: boolean;
 	// private _protected: boolean;
 	// private _indexed: boolean;
@@ -60,7 +61,7 @@ export class Storage {
 		} else {
 			throw new Error("storage: Valid first day of week options are: 0, 1, 'sunday' or 'monday'.");
 		}
-		// this._backupPath = config.backupPath || "";
+		this._backupPath = config.backupPath || undefined;
 		// this._useCompression = config.useCompression === true;
 		// this._protected = config.protected === false ? false : true;
 		// this._indexed = config.indexed === true;
@@ -176,8 +177,18 @@ export class Storage {
 		});
 	}
 
-	public searchFiles(fileConfig?: SearchFilesObjectT) {
+	// Method to backup files (compressing them), from origin to specified destination.
+	public runBackup(destinationBackupPath = this._backupPath) {
+		this.getTree().forEach(filename => {
+			const gzip = zlib.createGzip();
+			const input = fs.createReadStream(path.join(this._rootPath, filename));
+			const output = fs.createWriteStream(destinationBackupPath + filename);
+		input.pipe(gzip).pipe(output);
+		});
+	}
 
+	// Method to search files, according to the following parameters: name, size or modifiedDate.
+	public searchFiles(fileConfig?: SearchFilesObjectT) {
 		const mapFileToObject = (filePath: string) => {
 			const fileSpecs = fs.statSync(path.join(this._rootPath, filePath));
 			return {
@@ -187,7 +198,6 @@ export class Storage {
 				size: fileSpecs.size,
 			};
 		};
-
 		if (fileConfig) {
 			if (fileConfig.fileName && typeof fileConfig.fileName !== "string") throw new Error("storage: fileName must be of type string");
 			if (fileConfig.modificationDate?.oldest && !(fileConfig.modificationDate?.oldest instanceof Date)) throw new Error("storage: modificationDate.oldest must be of Date object.");
@@ -221,13 +231,8 @@ export class Storage {
 					file.size >= searchCriteria.fileSize.lowerBound &&
 					file.size <= searchCriteria.fileSize.upperBound;
 			});
-
 	}
 }
-
-// private runBackup() {
-// 	throw new Error*-("Método não implementado");
-// }
 
 type StorageConfigT = {
 	name: string;
@@ -236,7 +241,7 @@ type StorageConfigT = {
 	maxFileSize?: string;
 	maxFileAge?: string;
 	firstDayOfWeek?: 0 | 1 | "sunday" | "monday";
-	backupPath?: string;
+	backupPath?: string | undefined;
 	useCompression?: boolean;
 	protected?: boolean;
 	indexed?: boolean;
