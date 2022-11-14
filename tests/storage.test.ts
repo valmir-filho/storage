@@ -25,4 +25,5 @@ const storage = new Storage({
 // 	},
 // }));
 
-storage.runBackup();
+// console.log(storage.getTree());
+storage.runBackup("C:\\Users\\vconque\\Documents\\storage\\tests\\files");
