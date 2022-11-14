@@ -179,11 +179,27 @@ export class Storage {
 
 	// Method to backup files (compressing them), from origin to specified destination.
 	public runBackup(destinationBackupPath = this._backupPath) {
+		if (!destinationBackupPath) throw new Error("storage: destinationBackup needs to ber informed.");
+		if (!fs.existsSync(destinationBackupPath)) {
+			fs.mkdirSync(destinationBackupPath);
+		}
 		this.getTree().forEach(filename => {
+			console.log("filename", filename);
 			const gzip = zlib.createGzip();
-			const input = fs.createReadStream(path.join(this._rootPath, filename));
-			const output = fs.createWriteStream(destinationBackupPath + filename);
-		input.pipe(gzip).pipe(output);
+			const sourcePath = path.join(this._rootPath, filename);
+			const isDirectory = fs.statSync(sourcePath).isDirectory();
+			const outputPath = isDirectory ? path.join(destinationBackupPath, filename) : path.join(destinationBackupPath, filename + ".gz");
+			if (!fs.existsSync(outputPath) && isDirectory) {
+				fs.mkdirSync(outputPath);
+			}
+			if (!isDirectory) {
+				const input = fs.createReadStream(sourcePath);
+				console.log("input", input.path);
+				const output = fs.createWriteStream(outputPath);
+				console.log("output", output.path);
+
+				input.pipe(gzip).pipe(output);
+			}
 		});
 	}
 
